@@ -1,9 +1,10 @@
+Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele sisältöä Geminin avulla. Saat myös Gemini Pron ja pääsyn Googlen seuraavan sukupolven tekoälyominaisuuksiin kuukaudeksi hintaan 22,99 € 0 € (personoitu hinta).
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Touch Music Player v14</title>
+    <title>Neon Touch Music Player v15</title>
     
     <!-- APP ICONS: Replace href with your URL -->
     <link rel="icon" type="image/png" href="YOUR_ICON_URL_HERE.png">
@@ -192,6 +193,7 @@
         .master-vu-wrapper { width: 100%; height: 4px; background: #222; margin-top: 5px; border-radius: 2px; overflow: hidden; }
         .master-vu-bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--primary), var(--secondary)); }
 
+        /* Mobile / Desktop Recognition */
         @media (max-width: 768px) {
             #app-container { flex-direction: column; }
             #playlist-sidebar { position: fixed; top: 0; right: -100%; width: 85%; height: 100%; z-index: 50; box-shadow: -10px 0 30px rgba(0,0,0,0.8); }
@@ -205,6 +207,9 @@
 <body>
 
 <div id="bg-layer"></div>
+
+<!-- Dummy Audio for Quick Access / Media Session support -->
+<audio id="dummy-audio" loop style="display:none;" src="data:audio/mp3;base64,SUQzBAAAAAAAI1RTVlQAAAAOAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV6urq6urq6urq6urq6urq6urq6urq6urq6v////////////////////////////////8AAAAATGF2YzU4LjEzNQAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAABAAAAAgAAAAA="></audio>
 
 <div id="app-container">
     <div id="main-view">
@@ -350,9 +355,7 @@
         crossfade: 0,
         volume: 0.8,
         audioCtx: null,
-        
         activeSources: [], 
-        
         hpfNode: null,
         lpfNode: null,
         limiterNode: null,
@@ -403,7 +406,8 @@
         timeTotal: document.getElementById('time-total'),
         plTotalDuration: document.getElementById('pl-total-duration'),
         btnRepeatAll: document.getElementById('btn-repeat-all'),
-        btnRepeatOne: document.getElementById('btn-repeat-one')
+        btnRepeatOne: document.getElementById('btn-repeat-one'),
+        dummyAudio: document.getElementById('dummy-audio')
     };
 
     const canvasCtx = els.canvas.getContext('2d');
@@ -430,19 +434,17 @@
                 lim: els.limiterCheck.checked
             }
         };
-        localStorage.setItem('neonPlayerStateV14', JSON.stringify(data));
+        localStorage.setItem('neonPlayerStateV15', JSON.stringify(data));
     }
 
     function loadState() {
-        const raw = localStorage.getItem('neonPlayerStateV14');
+        const raw = localStorage.getItem('neonPlayerStateV15');
         if(!raw) return;
         try {
             const data = JSON.parse(raw);
-            
             state.volume = data.vol || 0.8;
             document.getElementById('vol-input').value = state.volume;
             document.getElementById('vol-val').innerText = Math.round(state.volume*100) + "%";
-            
             state.crossfade = data.xfade || 0;
             document.getElementById('xfade-input').value = state.crossfade;
             document.getElementById('xfade-val').innerText = state.crossfade + "s";
@@ -454,14 +456,11 @@
                 els.lpfCheck.checked = data.processors.lpf;
                 els.limiterCheck.checked = data.processors.lim;
             }
-
             if(data.playlist && Array.isArray(data.playlist)) {
                 state.playlist = data.playlist;
                 renderPlaylist();
             }
-
             state._savedEq = data.eq;
-
         } catch(e) { console.log("State load error", e); }
     }
 
@@ -483,7 +482,6 @@
             state.lpfNode.type = 'lowpass';
             state.lpfNode.Q.value = 0.7;
 
-            // FIX: CONNECT HPF TO LPF
             state.hpfNode.connect(state.lpfNode);
 
             let prev = state.lpfNode; 
@@ -523,10 +521,8 @@
 
     window.updateAudioProcessors = () => {
         if(!state.audioCtx) return;
-        
         state.hpfNode.frequency.value = els.hpfCheck.checked ? 30 : 0;
         state.lpfNode.frequency.value = els.lpfCheck.checked ? 20000 : 24000;
-
         if(els.limiterCheck.checked) {
             state.limiterNode.threshold.value = -1.0;
             state.limiterNode.ratio.value = 20.0;
@@ -534,7 +530,6 @@
             state.limiterNode.threshold.value = 0;
             state.limiterNode.ratio.value = 1.0; 
         }
-
         if(state.masterGain) {
              state.masterGain.gain.value = state.volume * (els.normCheck.checked ? state.normGain : 1.0);
         }
@@ -731,6 +726,9 @@
         drawWaveform(buffer);
         startSound(buffer, 0, true);
         
+        // Trigger Dummy Audio for Media Session / Quick Access
+        els.dummyAudio.play().catch(e => console.log("Dummy Audio Auto-play blocked", e));
+
         updateMediaSession(
             els.trackTitle.innerText, 
             els.trackArtist.innerText, 
@@ -810,8 +808,10 @@
             state.activeSources.forEach(s => s.source.stop());
             state.pauseTime = state.audioCtx.currentTime - state.startTime;
             state.isPlaying = false;
+            els.dummyAudio.pause();
         } else { 
             startSound(state.audioBuffer, state.pauseTime, false); 
+            els.dummyAudio.play();
         }
         updateButtonState();
     }
@@ -826,6 +826,10 @@
         state.isPlaying = false; 
         state.pauseTime = 0; 
         els.playhead.style.left = '0%';
+        
+        els.dummyAudio.pause();
+        els.dummyAudio.currentTime = 0;
+        
         updateButtonState();
     }
 
