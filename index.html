@@ -4,7 +4,7 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Touch Music Player v15</title>
+    <title>Neon Touch Music Player v16</title>
     
     <!-- APP ICONS: Replace href with your URL -->
     <link rel="icon" type="image/png" href="YOUR_ICON_URL_HERE.png">
@@ -79,14 +79,28 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
             z-index: 10;
         }
         #playlist-content { overflow-y: auto; flex: 1; padding: 10px; }
+        
         .playlist-item {
-            padding: 12px; margin-bottom: 5px; background: rgba(255,255,255,0.03);
-            border-radius: 8px; display: flex; justify-content: space-between;
-            font-size: 0.9rem; border-left: 3px solid transparent; cursor: pointer;
+            padding: 12px 8px; margin-bottom: 5px; background: rgba(255,255,255,0.03);
+            border-radius: 8px; display: flex; justify-content: space-between; align-items: center;
+            font-size: 0.9rem; border-left: 3px solid transparent; cursor: default;
+            touch-action: pan-y; /* Allow scrolling unless on handle */
         }
         .playlist-item.active { background: rgba(0, 255, 242, 0.15); border-left-color: var(--primary); color: var(--primary); }
         .playlist-item.selected { border: 1px solid var(--secondary); background: rgba(255, 0, 255, 0.1); }
         .playlist-item.missing { opacity: 0.5; border-left-color: red; }
+        .playlist-item.dragging { opacity: 0.5; background: var(--secondary); }
+
+        /* Drag Handle Style */
+        .drag-handle {
+            cursor: grab;
+            color: #555;
+            padding: 10px;
+            font-size: 1.2rem;
+            user-select: none;
+            touch-action: none; /* CRITICAL for mobile drag */
+        }
+        .playlist-item:hover .drag-handle { color: var(--primary); }
 
         #playlist-stats {
             padding: 5px 15px; font-size: 0.8rem; color: var(--primary); 
@@ -193,7 +207,6 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
         .master-vu-wrapper { width: 100%; height: 4px; background: #222; margin-top: 5px; border-radius: 2px; overflow: hidden; }
         .master-vu-bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--primary), var(--secondary)); }
 
-        /* Mobile / Desktop Recognition */
         @media (max-width: 768px) {
             #app-container { flex-direction: column; }
             #playlist-sidebar { position: fixed; top: 0; right: -100%; width: 85%; height: 100%; z-index: 50; box-shadow: -10px 0 30px rgba(0,0,0,0.8); }
@@ -207,9 +220,6 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
 <body>
 
 <div id="bg-layer"></div>
-
-<!-- Dummy Audio for Quick Access / Media Session support -->
-<audio id="dummy-audio" loop style="display:none;" src="data:audio/mp3;base64,SUQzBAAAAAAAI1RTVlQAAAAOAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV6urq6urq6urq6urq6urq6urq6urq6urq6v////////////////////////////////8AAAAATGF2YzU4LjEzNQAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAABAAAAAgAAAAA="></audio>
 
 <div id="app-container">
     <div id="main-view">
@@ -236,6 +246,10 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
         </div>
         <div id="playlist-stats">Total: <span id="pl-total-duration">00:00</span></div>
         <div style="display: flex; gap: 5px; padding: 5px 15px;">
+            <button class="btn" style="flex:1; padding: 5px;" id="btn-save" title="Save Playlist">💾</button>
+            <button class="btn" style="flex:1; padding: 5px;" onclick="document.getElementById('load-input').click()" title="Load Playlist">📂</button>
+            <input type="file" id="load-input" accept=".json" style="display:none">
+            
             <button class="btn" style="flex:1; padding: 5px;" id="btn-sort" onclick="sortPlaylist()">A-Z</button>
             <button class="btn" style="flex:1; padding: 5px;" id="btn-random">🔀</button>
             <button class="btn" style="flex:1; padding: 5px;" id="btn-clear-all">🗑️ All</button>
@@ -369,7 +383,9 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
         normGain: 1.0,
         repeatAll: false,
         repeatOne: false,
-        _savedEq: null
+        fadingOutNode: null,
+        _savedEq: null,
+        touchDragSrc: null
     };
 
     const presets = {
@@ -406,8 +422,7 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
         timeTotal: document.getElementById('time-total'),
         plTotalDuration: document.getElementById('pl-total-duration'),
         btnRepeatAll: document.getElementById('btn-repeat-all'),
-        btnRepeatOne: document.getElementById('btn-repeat-one'),
-        dummyAudio: document.getElementById('dummy-audio')
+        btnRepeatOne: document.getElementById('btn-repeat-one')
     };
 
     const canvasCtx = els.canvas.getContext('2d');
@@ -434,17 +449,19 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
                 lim: els.limiterCheck.checked
             }
         };
-        localStorage.setItem('neonPlayerStateV15', JSON.stringify(data));
+        localStorage.setItem('neonPlayerStateV16', JSON.stringify(data));
     }
 
     function loadState() {
-        const raw = localStorage.getItem('neonPlayerStateV15');
+        const raw = localStorage.getItem('neonPlayerStateV16');
         if(!raw) return;
         try {
             const data = JSON.parse(raw);
+            
             state.volume = data.vol || 0.8;
             document.getElementById('vol-input').value = state.volume;
             document.getElementById('vol-val').innerText = Math.round(state.volume*100) + "%";
+            
             state.crossfade = data.xfade || 0;
             document.getElementById('xfade-input').value = state.crossfade;
             document.getElementById('xfade-val').innerText = state.crossfade + "s";
@@ -456,11 +473,14 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
                 els.lpfCheck.checked = data.processors.lpf;
                 els.limiterCheck.checked = data.processors.lim;
             }
+
             if(data.playlist && Array.isArray(data.playlist)) {
                 state.playlist = data.playlist;
                 renderPlaylist();
             }
+
             state._savedEq = data.eq;
+
         } catch(e) { console.log("State load error", e); }
     }
 
@@ -521,8 +541,10 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
 
     window.updateAudioProcessors = () => {
         if(!state.audioCtx) return;
+        
         state.hpfNode.frequency.value = els.hpfCheck.checked ? 30 : 0;
         state.lpfNode.frequency.value = els.lpfCheck.checked ? 20000 : 24000;
+
         if(els.limiterCheck.checked) {
             state.limiterNode.threshold.value = -1.0;
             state.limiterNode.ratio.value = 20.0;
@@ -530,6 +552,7 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
             state.limiterNode.threshold.value = 0;
             state.limiterNode.ratio.value = 1.0; 
         }
+
         if(state.masterGain) {
              state.masterGain.gain.value = state.volume * (els.normCheck.checked ? state.normGain : 1.0);
         }
@@ -587,6 +610,45 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
         }
     }
 
+    document.getElementById('btn-save').onclick = () => {
+        const exportData = state.playlist.map(item => ({
+            name: item.name,
+            type: item.type,
+            data: item.type === 'url' ? item.data : null 
+        }));
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'playlist.json';
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    document.getElementById('load-input').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            try {
+                const data = JSON.parse(ev.target.result);
+                if(Array.isArray(data)) {
+                    data.forEach(item => {
+                        if(item.type === 'url') {
+                            state.playlist.push({ type: 'url', name: item.name, data: item.data, duration: 0 });
+                        } else {
+                            state.playlist.push({ type: 'file_ref', name: "[Missing] " + item.name, data: null, duration: 0 });
+                        }
+                    });
+                    renderPlaylist();
+                    saveState();
+                }
+            } catch(err) { alert("Invalid Playlist File"); }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+    });
+
     document.getElementById('btn-clear-all').onclick = () => {
         if(confirm("Are you sure you want to clear the playlist?")) {
             stop();
@@ -620,19 +682,67 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
             const div = document.createElement('div');
             const isMissing = item.type === 'file_ref';
             div.className = `playlist-item ${idx === state.loadedIndex ? 'active' : ''} ${item.selected ? 'selected' : ''} ${isMissing ? 'missing' : ''}`;
-            div.draggable = true;
-            div.innerHTML = `<span>${idx+1}. ${item.name}</span> <span style="font-size:0.7rem; color:#666;">${item.duration ? formatTime(item.duration) : ''}</span>`;
+            div.dataset.index = idx; // Critical for drag logic
             
-            div.onclick = (e) => {
-                if(e.target.closest('.btn')) return;
-                if(isMissing) { alert("Restored session: Please re-add the folder/files to play this track."); return; }
-                if(!e.ctrlKey) state.playlist.forEach(p => p.selected = false);
-                item.selected = true;
-                state.currentIndex = idx; 
-                renderPlaylist();
-            };
+            // Drag Handle
+            const handle = document.createElement('span');
+            handle.className = 'drag-handle';
+            handle.innerHTML = '⋮⋮';
+            
+            const info = document.createElement('div');
+            info.style.flexGrow = 1;
+            info.innerHTML = `<span>${idx+1}. ${item.name}</span> <span style="font-size:0.7rem; color:#666;">${item.duration ? formatTime(item.duration) : ''}</span>`;
+            
+            div.appendChild(handle);
+            div.appendChild(info);
+            
+            // DESKTOP DRAG ENABLE
+            handle.onmouseover = () => div.draggable = true;
+            handle.onmouseout = () => div.draggable = false;
 
-            div.addEventListener('dragstart', e => e.dataTransfer.setData('text', idx));
+            // MOBILE TOUCH DRAG
+            handle.addEventListener('touchstart', (e) => {
+                e.preventDefault(); // Scroll lock
+                state.touchDragSrc = idx;
+                div.classList.add('dragging');
+            }, {passive: false});
+
+            handle.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const target = document.elementFromPoint(touch.clientX, touch.clientY);
+                const targetRow = target ? target.closest('.playlist-item') : null;
+                
+                if (targetRow) {
+                    const targetIdx = parseInt(targetRow.dataset.index);
+                    if (!isNaN(targetIdx) && targetIdx !== state.touchDragSrc) {
+                        // Swap
+                        const movedItem = state.playlist[state.touchDragSrc];
+                        state.playlist.splice(state.touchDragSrc, 1);
+                        state.playlist.splice(targetIdx, 0, movedItem);
+                        
+                        // Update indexes
+                        if(state.currentIndex === state.touchDragSrc) state.currentIndex = targetIdx;
+                        else if(state.currentIndex === targetIdx) state.currentIndex = state.touchDragSrc;
+                        if(state.loadedIndex === state.touchDragSrc) state.loadedIndex = targetIdx;
+                        else if(state.loadedIndex === targetIdx) state.loadedIndex = state.touchDragSrc;
+
+                        state.touchDragSrc = targetIdx;
+                        renderPlaylist();
+                        saveState();
+                    }
+                }
+            }, {passive: false});
+
+            handle.addEventListener('touchend', () => {
+                state.touchDragSrc = null;
+                renderPlaylist(); // Clean visual state
+            });
+
+            // DESKTOP DRAG EVENTS
+            div.addEventListener('dragstart', e => {
+                e.dataTransfer.setData('text', idx);
+            });
             div.addEventListener('dragover', e => e.preventDefault());
             div.addEventListener('drop', e => {
                 e.preventDefault();
@@ -644,6 +754,17 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
                 renderPlaylist();
                 saveState();
             });
+
+            // CLICK SELECTION
+            div.onclick = (e) => {
+                if(e.target.closest('.btn') || e.target.classList.contains('drag-handle')) return;
+                if(isMissing) { alert("Restored session: Please re-add the folder/files to play this track."); return; }
+                if(!e.ctrlKey) state.playlist.forEach(p => p.selected = false);
+                item.selected = true;
+                state.currentIndex = idx; 
+                renderPlaylist();
+            };
+
             els.playlist.appendChild(div);
         });
         updatePlaylistTotalTime();
@@ -726,9 +847,6 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
         drawWaveform(buffer);
         startSound(buffer, 0, true);
         
-        // Trigger Dummy Audio for Media Session / Quick Access
-        els.dummyAudio.play().catch(e => console.log("Dummy Audio Auto-play blocked", e));
-
         updateMediaSession(
             els.trackTitle.innerText, 
             els.trackArtist.innerText, 
@@ -808,10 +926,8 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
             state.activeSources.forEach(s => s.source.stop());
             state.pauseTime = state.audioCtx.currentTime - state.startTime;
             state.isPlaying = false;
-            els.dummyAudio.pause();
         } else { 
             startSound(state.audioBuffer, state.pauseTime, false); 
-            els.dummyAudio.play();
         }
         updateButtonState();
     }
@@ -826,10 +942,6 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
         state.isPlaying = false; 
         state.pauseTime = 0; 
         els.playhead.style.left = '0%';
-        
-        els.dummyAudio.pause();
-        els.dummyAudio.currentTime = 0;
-        
         updateButtonState();
     }
 
@@ -922,49 +1034,78 @@ Kokeile tekoälyä suoraan suosikkisovelluksissa … Luo luonnoksia ja parantele
 
     function loadAssets(idx) {
         const item = state.playlist[idx];
-        const base = item.name.substring(0, item.name.lastIndexOf('.'));
-        
-        let file = item.data;
-        let folderPath = "";
-        
-        if(file && file.webkitRelativePath) {
-             folderPath = file.webkitRelativePath.substring(0, file.webkitRelativePath.lastIndexOf('/') + 1);
-        }
-
-        const findFile = (criteria) => {
-            return state.allFiles.find(f => {
-                const path = f.webkitRelativePath || "";
-                const inFolder = folderPath ? path.startsWith(folderPath) : true;
-                return inFolder && criteria(f.name);
-            });
-        };
-
-        let img = findFile(name => name.startsWith(base) && (name.endsWith('.jpg') || name.endsWith('.png')));
-        if (!img) img = findFile(name => name.toLowerCase() === 'folder.jpg' || name.toLowerCase() === 'cover.jpg');
-
         let result = { coverUrl: null };
+        
+        // FIX: Logic flow corrected to allow both image AND lyrics to load
+        
+        // 1. Local File Logic
+        if (item.type === 'file') {
+            const base = item.name.substring(0, item.name.lastIndexOf('.'));
+            let file = item.data;
+            let folderPath = "";
+            if(file && file.webkitRelativePath) {
+                 folderPath = file.webkitRelativePath.substring(0, file.webkitRelativePath.lastIndexOf('/') + 1);
+            }
+            const findFile = (criteria) => {
+                return state.allFiles.find(f => {
+                    const path = f.webkitRelativePath || "";
+                    const inFolder = folderPath ? path.startsWith(folderPath) : true;
+                    return inFolder && criteria(f.name);
+                });
+            };
+            
+            let img = findFile(name => name.startsWith(base) && (name.endsWith('.jpg') || name.endsWith('.png')));
+            if (!img) img = findFile(name => name.toLowerCase() === 'folder.jpg' || name.toLowerCase() === 'cover.jpg');
+            
+            if (img) {
+                const u = URL.createObjectURL(img);
+                els.cover.src = u;
+                els.bg.style.backgroundImage = `url(${u})`;
+                result.coverUrl = u;
+            } else {
+                // Fallback
+                const def = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MDAiIGhlaWdodD0iNTAwIiB2aWV3Qm94PSIwIDAgNTAwIDUwMCI+PHJlY3Qgd2lkdGg9IjUwMCIgaGVpZ2h0PSI1MDAiIGZpbGw9IiMxMTEiLz48Y2lyY2xlIGN4PSIyNTAiIGN5PSIyNTAiIHI9IjEwMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzMzIiBzdHJva2Utd2lkdGg9IjUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzU1NSIgZm9udC1zaXplPSIzMCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiPk1VU0lDPC90ZXh0Pjwvc3ZnPg==";
+                els.cover.src = def;
+                els.bg.style.backgroundImage = 'none';
+                result.coverUrl = def;
+            }
 
-        if (img) {
-            const u = URL.createObjectURL(img);
-            els.cover.src = u;
-            els.bg.style.backgroundImage = `url(${u})`;
-            result.coverUrl = u;
-        } else {
-             const def = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MDAiIGhlaWdodD0iNTAwIiB2aWV3Qm94PSIwIDAgNTAwIDUwMCI+PHJlY3Qgd2lkdGg9IjUwMCIgaGVpZ2h0PSI1MDAiIGZpbGw9IiMxMTEiLz48Y2lyY2xlIGN4PSIyNTAiIGN5PSIyNTAiIHI9IjEwMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzMzIiBzdHJva2Utd2lkdGg9IjUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzU1NSIgZm9udC1zaXplPSIzMCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiPk1VU0lDPC90ZXh0Pjwvc3ZnPg==";
-             els.cover.src = def;
-             els.bg.style.backgroundImage = 'none';
-             result.coverUrl = def;
+            // Lyrics Logic
+            let txt = findFile(name => name === base + '.txt');
+            if (!txt) txt = findFile(name => name.toLowerCase() === 'lyrics.txt');
+
+            if (txt) {
+                const r = new FileReader();
+                r.onload = e => els.lyricsText.innerText = e.target.result;
+                r.readAsText(txt);
+            } else { els.lyricsText.innerText = "No lyrics found."; }
+
+        } 
+        // 2. URL Logic
+        else if (item.type === 'url') {
+            const url = item.data;
+            const baseUrl = url.substring(0, url.lastIndexOf('/') + 1);
+            const coverUrl = baseUrl + 'folder.jpg';
+            const lyricsUrl = baseUrl + 'lyrics.txt';
+            
+            const tempImg = new Image();
+            tempImg.onload = () => {
+                els.cover.src = coverUrl;
+                els.bg.style.backgroundImage = `url(${coverUrl})`;
+            };
+            tempImg.onerror = () => {
+                els.cover.src = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MDAiIGhlaWdodD0iNTAwIiB2aWV3Qm94PSIwIDAgNTAwIDUwMCI+PHJlY3Qgd2lkdGg9IjUwMCIgaGVpZ2h0PSI1MDAiIGZpbGw9IiMxMTEiLz48Y2lyY2xlIGN4PSIyNTAiIGN5PSIyNTAiIHI9IjEwMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzMzIiBzdHJva2Utd2lkdGg9IjUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzU1NSIgZm9udC1zaXplPSIzMCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiPk1VU0lDPC90ZXh0Pjwvc3ZnPg==";
+                els.bg.style.backgroundImage = 'none';
+            };
+            tempImg.src = coverUrl;
+            result.coverUrl = coverUrl;
+
+            fetch(lyricsUrl)
+                .then(r => { if(r.ok) return r.text(); throw new Error('No lyrics'); })
+                .then(text => els.lyricsText.innerText = text)
+                .catch(() => els.lyricsText.innerText = "No lyrics found.");
         }
 
-        let txt = findFile(name => name === base + '.txt');
-        if (!txt) txt = findFile(name => name.toLowerCase() === 'lyrics.txt');
-
-        if (txt) {
-            const r = new FileReader();
-            r.onload = e => els.lyricsText.innerText = e.target.result;
-            r.readAsText(txt);
-        } else { els.lyricsText.innerText = "No lyrics found."; }
-        
         return result;
     }
 
