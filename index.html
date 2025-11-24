@@ -1,9 +1,14 @@
 <!DOCTYPE html>
-<html lang="fi">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Touch Music Player v10</title>
+    <title>Neon Touch Music Player v14</title>
+    
+    <!-- APP ICONS: Replace href with your URL -->
+    <link rel="icon" type="image/png" href="YOUR_ICON_URL_HERE.png">
+    <link rel="apple-touch-icon" href="YOUR_ICON_URL_HERE.png">
+    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
     <style>
@@ -38,7 +43,7 @@
             display: flex; flex-direction: row; height: 100vh; width: 100%;
         }
 
-        /* Vasen / Yläosa */
+        /* Left / Top View */
         #main-view {
             flex: 1; display: flex; flex-direction: column;
             position: relative; z-index: 1;
@@ -64,7 +69,7 @@
             object-fit: contain; transition: transform 0.3s;
         }
 
-        /* Oikea / Lista */
+        /* Right / Playlist Sidebar */
         #playlist-sidebar {
             width: 350px; background: rgba(0,0,0,0.8);
             border-left: 1px solid var(--glass-border);
@@ -80,13 +85,14 @@
         }
         .playlist-item.active { background: rgba(0, 255, 242, 0.15); border-left-color: var(--primary); color: var(--primary); }
         .playlist-item.selected { border: 1px solid var(--secondary); background: rgba(255, 0, 255, 0.1); }
+        .playlist-item.missing { opacity: 0.5; border-left-color: red; }
 
         #playlist-stats {
             padding: 5px 15px; font-size: 0.8rem; color: var(--primary); 
             text-align: right; border-bottom: 1px solid rgba(255,255,255,0.1);
         }
 
-        /* Alapaneeli */
+        /* Bottom Panel */
         #bottom-panel {
             position: fixed; bottom: 0; left: 0; width: 100%;
             height: auto; min-height: 280px;
@@ -127,7 +133,7 @@
         input[type="range"].h-slider { width: 100%; -webkit-appearance: none; background: #333; height: 6px; border-radius: 3px; cursor: pointer; }
         input[type="range"].h-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; background: white; border-radius: 50%; box-shadow: 0 0 10px rgba(255,255,255,0.5); }
 
-        /* EQ / Processors Controls */
+        /* EQ / Processors */
         .processors-grid {
             display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
             margin-bottom: 15px; width: 100%; padding: 0 20px;
@@ -139,15 +145,15 @@
         }
         .proc-input { width: 40px; background: #222; border: 1px solid #444; color: white; text-align: center; border-radius: 4px; padding: 2px; }
 
+        /* Modals */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 100; justify-content: center; align-items: center; backdrop-filter: blur(10px); }
         .modal-content { background: #111; padding: 20px; border-radius: 20px; border: 1px solid var(--primary); max-width: 95%; max-height: 95%; overflow-y: auto; text-align: center; position: relative; }
-        
-        /* Sticky close button for lyrics scrolling */
         .close-modal { 
             position: sticky; top: 0; float: right; 
             background: red; border:0; color:white; width:30px; height:30px; border-radius:50%; z-index: 1000;
         }
 
+        /* EQ Container */
         #eq-wrapper { display: flex; flex-direction: column; gap: 15px; width: 100%; overflow-x: auto; padding-bottom: 20px; }
         #eq-container { 
             display: flex; gap: 12px; height: 320px; align-items: flex-start; 
@@ -225,13 +231,10 @@
         </div>
         <div id="playlist-stats">Total: <span id="pl-total-duration">00:00</span></div>
         <div style="display: flex; gap: 5px; padding: 5px 15px;">
-            <button class="btn" style="flex:1; padding: 5px;" id="btn-save" title="Save Playlist">💾</button>
-            <button class="btn" style="flex:1; padding: 5px;" onclick="document.getElementById('load-input').click()" title="Load Playlist">📂</button>
-            <input type="file" id="load-input" accept=".json" style="display:none">
-            
             <button class="btn" style="flex:1; padding: 5px;" id="btn-sort" onclick="sortPlaylist()">A-Z</button>
             <button class="btn" style="flex:1; padding: 5px;" id="btn-random">🔀</button>
-            <button class="btn" style="flex:1; padding: 5px;" id="btn-remove">🗑️</button>
+            <button class="btn" style="flex:1; padding: 5px;" id="btn-clear-all">🗑️ All</button>
+            <button class="btn" style="flex:1; padding: 5px;" id="btn-remove">🗑️ Sel</button>
         </div>
         <div style="display: flex; gap: 5px; padding: 0 15px 5px 15px;">
              <button class="btn" style="flex:1; padding: 5px;" id="btn-up">▲</button>
@@ -347,8 +350,9 @@
         crossfade: 0,
         volume: 0.8,
         audioCtx: null,
-        sourceNode: null,
-        gainNode: null,
+        
+        activeSources: [], 
+        
         hpfNode: null,
         lpfNode: null,
         limiterNode: null,
@@ -362,7 +366,7 @@
         normGain: 1.0,
         repeatAll: false,
         repeatOne: false,
-        fadingOutNode: null
+        _savedEq: null
     };
 
     const presets = {
@@ -385,11 +389,13 @@
         sidebar: document.getElementById('playlist-sidebar'),
         masterVu: document.getElementById('master-vu'),
         lyricsText: document.getElementById('lyrics-text'),
+        
         normCheck: document.getElementById('norm-check'),
         normTarget: document.getElementById('norm-target'),
         hpfCheck: document.getElementById('hpf-check'),
         lpfCheck: document.getElementById('lpf-check'),
         limiterCheck: document.getElementById('limiter-check'),
+        
         trackArtist: document.getElementById('track-artist'),
         trackTitle: document.getElementById('track-title'),
         trackAlbum: document.getElementById('track-album'),
@@ -402,6 +408,65 @@
 
     const canvasCtx = els.canvas.getContext('2d');
 
+    function saveState() {
+        const eqValues = state.eqNodes.map(n => n.gain.value);
+        const simplifiedPlaylist = state.playlist.map(p => ({
+            name: p.name,
+            type: p.type === 'file' ? 'file_ref' : p.type,
+            data: p.type === 'url' ? p.data : null,
+            duration: p.duration
+        }));
+
+        const data = {
+            vol: state.volume,
+            xfade: state.crossfade,
+            eq: eqValues.length ? eqValues : new Array(16).fill(0),
+            playlist: simplifiedPlaylist,
+            processors: {
+                norm: els.normCheck.checked,
+                normT: els.normTarget.value,
+                hpf: els.hpfCheck.checked,
+                lpf: els.lpfCheck.checked,
+                lim: els.limiterCheck.checked
+            }
+        };
+        localStorage.setItem('neonPlayerStateV14', JSON.stringify(data));
+    }
+
+    function loadState() {
+        const raw = localStorage.getItem('neonPlayerStateV14');
+        if(!raw) return;
+        try {
+            const data = JSON.parse(raw);
+            
+            state.volume = data.vol || 0.8;
+            document.getElementById('vol-input').value = state.volume;
+            document.getElementById('vol-val').innerText = Math.round(state.volume*100) + "%";
+            
+            state.crossfade = data.xfade || 0;
+            document.getElementById('xfade-input').value = state.crossfade;
+            document.getElementById('xfade-val').innerText = state.crossfade + "s";
+
+            if(data.processors) {
+                els.normCheck.checked = data.processors.norm;
+                els.normTarget.value = data.processors.normT;
+                els.hpfCheck.checked = data.processors.hpf;
+                els.lpfCheck.checked = data.processors.lpf;
+                els.limiterCheck.checked = data.processors.lim;
+            }
+
+            if(data.playlist && Array.isArray(data.playlist)) {
+                state.playlist = data.playlist;
+                renderPlaylist();
+            }
+
+            state._savedEq = data.eq;
+
+        } catch(e) { console.log("State load error", e); }
+    }
+
+    window.addEventListener('DOMContentLoaded', loadState);
+
     function initAudio() {
         if (!state.audioCtx) {
             state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -410,40 +475,42 @@
             state.analyser = state.audioCtx.createAnalyser();
             state.analyser.fftSize = 2048;
 
-            // HPF & LPF
             state.hpfNode = state.audioCtx.createBiquadFilter();
             state.hpfNode.type = 'highpass';
-            state.hpfNode.frequency.value = 30; // Default ON
             state.hpfNode.Q.value = 0.7;
 
             state.lpfNode = state.audioCtx.createBiquadFilter();
             state.lpfNode.type = 'lowpass';
-            state.lpfNode.frequency.value = 20000; // Default ON
             state.lpfNode.Q.value = 0.7;
 
-            // EQ Chain
-            let prev = state.lpfNode; // Connect LPF to first EQ
-            state.eqNodes = state.eqBands.map(f => {
+            // FIX: CONNECT HPF TO LPF
+            state.hpfNode.connect(state.lpfNode);
+
+            let prev = state.lpfNode; 
+            state.eqNodes = state.eqBands.map((f, i) => {
                 const node = state.audioCtx.createBiquadFilter();
                 node.type = 'peaking';
                 node.frequency.value = f;
                 node.Q.value = 1.4;
-                node.gain.value = 0;
+                node.gain.value = (state._savedEq && state._savedEq[i]) ? state._savedEq[i] : 0;
+                
+                const slider = document.getElementById(`eq-slide-${i}`);
+                if(slider) {
+                    slider.value = node.gain.value;
+                    const lbl = document.getElementById(`db-val-${i}`);
+                    if(lbl) lbl.innerText = (node.gain.value > 0 ? '+' : '') + node.gain.value + 'dB';
+                }
+
                 prev.connect(node);
                 prev = node;
                 return node;
             });
 
-            // Limiter (DynamicsCompressor)
             state.limiterNode = state.audioCtx.createDynamicsCompressor();
-            state.limiterNode.threshold.value = -1.0; // Hard limit at -1dB
             state.limiterNode.knee.value = 0;
-            state.limiterNode.ratio.value = 20.0; // High ratio for limiting
-            state.limiterNode.attack.value = 0.001; // Fast attack
+            state.limiterNode.attack.value = 0.001;
             state.limiterNode.release.value = 0.1;
 
-            // Chain: Gain -> HPF -> LPF -> EQ -> MasterGain -> Limiter -> Analyser -> Dest
-            // Gain is created per track in startSound and connected to hpfNode
             state.eqNodes[state.eqNodes.length-1].connect(state.masterGain);
             state.masterGain.connect(state.limiterNode);
             state.limiterNode.connect(state.analyser);
@@ -457,31 +524,25 @@
     window.updateAudioProcessors = () => {
         if(!state.audioCtx) return;
         
-        // HPF Logic
-        if(els.hpfCheck.checked) state.hpfNode.frequency.value = 30;
-        else state.hpfNode.frequency.value = 0;
+        state.hpfNode.frequency.value = els.hpfCheck.checked ? 30 : 0;
+        state.lpfNode.frequency.value = els.lpfCheck.checked ? 20000 : 24000;
 
-        // LPF Logic
-        if(els.lpfCheck.checked) state.lpfNode.frequency.value = 20000;
-        else state.lpfNode.frequency.value = 24000; // Above hearing
-
-        // Limiter Logic
         if(els.limiterCheck.checked) {
             state.limiterNode.threshold.value = -1.0;
             state.limiterNode.ratio.value = 20.0;
         } else {
-            state.limiterNode.threshold.value = 0; // Effectively bypass if signal < 0
-            state.limiterNode.ratio.value = 1.0; // No compression
+            state.limiterNode.threshold.value = 0;
+            state.limiterNode.ratio.value = 1.0; 
         }
 
-        // Normalize Gain Recalculation (if playing)
         if(state.masterGain) {
              state.masterGain.gain.value = state.volume * (els.normCheck.checked ? state.normGain : 1.0);
         }
+        saveState();
     };
 
-    function handleFiles(files) {
-        files = Array.from(files);
+    function handleFiles(e) {
+        const files = Array.from(e.target.files);
         state.allFiles = [...state.allFiles, ...files];
         for (let f of files) {
             if (f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|ogg)$/i)) {
@@ -493,15 +554,18 @@
                     newItem.duration = aud.duration;
                     updatePlaylistTotalTime();
                     URL.revokeObjectURL(tempUrl);
+                    saveState();
                 };
             }
         }
         renderPlaylist();
         togglePlaylist(true);
+        saveState();
+        e.target.value = '';
     }
 
-    document.getElementById('file-input').addEventListener('change', (e) => handleFiles(e.target.files));
-    document.getElementById('folder-input').addEventListener('change', (e) => handleFiles(e.target.files));
+    document.getElementById('file-input').addEventListener('change', (e) => handleFiles(e));
+    document.getElementById('folder-input').addEventListener('change', (e) => handleFiles(e));
 
     function updatePlaylistTotalTime() {
         const total = state.playlist.reduce((acc, item) => acc + (item.duration || 0), 0);
@@ -524,82 +588,49 @@
             state.playlist.push({ type: 'url', data: url, name: name, selected: false, duration: 0 });
             renderPlaylist();
             closeUrlModal();
+            saveState();
         }
     }
 
-    document.getElementById('btn-save').onclick = () => {
-        const exportData = state.playlist.map(item => ({
-            name: item.name,
-            type: item.type,
-            data: item.type === 'url' ? item.data : null 
-        }));
-        const blob = new Blob([JSON.stringify(exportData, null, 2)], {type: 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'playlist.json';
-        a.click();
-        URL.revokeObjectURL(url);
+    document.getElementById('btn-clear-all').onclick = () => {
+        if(confirm("Are you sure you want to clear the playlist?")) {
+            stop();
+            state.playlist = [];
+            state.currentIndex = -1;
+            state.loadedIndex = -1;
+            renderPlaylist();
+            saveState();
+        }
     };
-
-    document.getElementById('load-input').addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if(!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            try {
-                const data = JSON.parse(ev.target.result);
-                if(Array.isArray(data)) {
-                    data.forEach(item => {
-                        if(item.type === 'url') {
-                            state.playlist.push({ type: 'url', name: item.name, data: item.data, duration: 0 });
-                        } else {
-                            state.playlist.push({ type: 'file_ref', name: "[Missing] " + item.name, data: null, duration: 0 });
-                        }
-                    });
-                    renderPlaylist();
-                }
-            } catch(err) { alert("Invalid Playlist File"); }
-        };
-        reader.readAsText(file);
-    });
 
     els.btnRepeatAll.onclick = () => {
         state.repeatAll = !state.repeatAll;
-        if(state.repeatAll) els.btnRepeatAll.classList.add('btn-active-state');
-        else els.btnRepeatAll.classList.remove('btn-active-state');
+        state.repeatAll ? els.btnRepeatAll.classList.add('btn-active-state') : els.btnRepeatAll.classList.remove('btn-active-state');
     };
     
     els.btnRepeatOne.onclick = () => {
         state.repeatOne = !state.repeatOne;
-        if(state.repeatOne) els.btnRepeatOne.classList.add('btn-active-state');
-        else els.btnRepeatOne.classList.remove('btn-active-state');
+        state.repeatOne ? els.btnRepeatOne.classList.add('btn-active-state') : els.btnRepeatOne.classList.remove('btn-active-state');
     };
 
     window.sortPlaylist = () => {
         state.playlist.sort((a, b) => a.name.localeCompare(b.name));
-        
-        // Fix indices logic if playing
-        // (Simple approach: If playing, user needs to find song again visually, or we'd need complex ID tracking)
-        // Resetting loadedIndex visual just for safety if sorted
-        if(state.loadedIndex !== -1) {
-             // Find current playing name to keep index correct (optional but good UX)
-             // For now, simple sort is enough.
-        }
         renderPlaylist();
+        saveState();
     };
 
     function renderPlaylist() {
         els.playlist.innerHTML = '';
         state.playlist.forEach((item, idx) => {
             const div = document.createElement('div');
-            div.className = `playlist-item ${idx === state.loadedIndex ? 'active' : ''} ${item.selected ? 'selected' : ''}`;
+            const isMissing = item.type === 'file_ref';
+            div.className = `playlist-item ${idx === state.loadedIndex ? 'active' : ''} ${item.selected ? 'selected' : ''} ${isMissing ? 'missing' : ''}`;
             div.draggable = true;
             div.innerHTML = `<span>${idx+1}. ${item.name}</span> <span style="font-size:0.7rem; color:#666;">${item.duration ? formatTime(item.duration) : ''}</span>`;
             
             div.onclick = (e) => {
                 if(e.target.closest('.btn')) return;
-                if(item.type === 'file_ref') { alert("Please re-add this local file."); return; }
+                if(isMissing) { alert("Restored session: Please re-add the folder/files to play this track."); return; }
                 if(!e.ctrlKey) state.playlist.forEach(p => p.selected = false);
                 item.selected = true;
                 state.currentIndex = idx; 
@@ -616,6 +647,7 @@
                 if(state.currentIndex === from) state.currentIndex = idx;
                 if(state.loadedIndex === from) state.loadedIndex = idx;
                 renderPlaylist();
+                saveState();
             });
             els.playlist.appendChild(div);
         });
@@ -630,24 +662,36 @@
         return 20 * Math.log10(rms + 1e-10);
     }
 
+    function updateMediaSession(title, artist, coverUrl) {
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: title || "Unknown Title",
+                artist: artist || "Unknown Artist",
+                artwork: [
+                    { src: coverUrl || '', sizes: '512x512', type: 'image/png' }
+                ]
+            });
+            navigator.mediaSession.setActionHandler('play', () => { togglePlayPause(); });
+            navigator.mediaSession.setActionHandler('pause', () => { togglePlayPause(); });
+            navigator.mediaSession.setActionHandler('previoustrack', () => { if(state.playlist.length) playTrack(state.currentIndex - 1); });
+            navigator.mediaSession.setActionHandler('nexttrack', () => { if(state.playlist.length) playTrack(state.currentIndex + 1); });
+            navigator.mediaSession.setActionHandler('stop', () => { stop(); });
+        }
+    }
+
     async function playTrack(index) {
         initAudio();
         
-        if (state.isPlaying && state.sourceNode && state.gainNode) {
-            const oldG = state.gainNode;
-            const oldS = state.sourceNode;
-            const now = state.audioCtx.currentTime;
-            
-            oldG.gain.cancelScheduledValues(now);
-            oldG.gain.setValueAtTime(oldG.gain.value, now);
-            oldG.gain.linearRampToValueAtTime(0, now + state.crossfade);
-            oldS.stop(now + state.crossfade);
-            state.fadingOutNode = oldS;
-
-            setTimeout(() => { 
-                try{ oldS.disconnect(); oldG.disconnect(); }catch(e){} 
-                if(state.fadingOutNode === oldS) state.fadingOutNode = null;
-            }, (state.crossfade+0.2)*1000);
+        const now = state.audioCtx.currentTime;
+        if (state.activeSources.length > 0) {
+            state.activeSources.forEach(obj => {
+                try {
+                    obj.gain.gain.cancelScheduledValues(now);
+                    obj.gain.gain.setValueAtTime(obj.gain.gain.value, now);
+                    obj.gain.gain.linearRampToValueAtTime(0, now + state.crossfade);
+                    obj.source.stop(now + state.crossfade + 0.1);
+                } catch(e) {}
+            });
         }
 
         if (index >= state.playlist.length) index = 0;
@@ -655,7 +699,7 @@
         state.currentIndex = index;
         state.loadedIndex = index;
         
-        loadAssets(index);
+        const assetData = loadAssets(index); 
         updateMetadata(state.playlist[index]);
         renderPlaylist();
 
@@ -680,13 +724,18 @@
         updatePlaylistTotalTime();
 
         state.normGain = 1.0;
-        // Normalize Calculation
         const currentLoudness = calculateLoudness(buffer);
         const targetLoudness = parseFloat(els.normTarget.value) || -14;
         state.normGain = Math.pow(10, (targetLoudness - currentLoudness) / 20);
         
         drawWaveform(buffer);
         startSound(buffer, 0, true);
+        
+        updateMediaSession(
+            els.trackTitle.innerText, 
+            els.trackArtist.innerText, 
+            assetData.coverUrl
+        );
     }
 
     function updateMetadata(item) {
@@ -712,16 +761,12 @@
         source.buffer = buffer;
         const gain = state.audioCtx.createGain();
         
-        // New Connection Chain: Gain -> HPF -> LPF -> EQ -> Master -> Limiter -> Analyser
         source.connect(gain);
         gain.connect(state.hpfNode);
-        state.hpfNode.connect(state.lpfNode);
-        state.lpfNode.connect(state.eqNodes[0]);
         
-        state.sourceNode = source;
-        state.gainNode = gain;
+        const sourceObj = { source: source, gain: gain };
+        state.activeSources.push(sourceObj);
 
-        // Apply Gain (Master + Norm)
         const targetVol = state.volume * (els.normCheck.checked ? state.normGain : 1.0);
         const now = state.audioCtx.currentTime;
 
@@ -740,7 +785,8 @@
         requestAnimationFrame(animate);
 
         source.onended = () => {
-            if (state.audioCtx.currentTime - state.startTime >= buffer.duration - 0.5) {
+            state.activeSources = state.activeSources.filter(s => s !== sourceObj);
+            if (state.currentIndex === state.loadedIndex && state.audioCtx.currentTime - state.startTime >= buffer.duration - 0.5) {
                 if (state.repeatOne) {
                     playTrack(state.loadedIndex);
                 } else if (state.loadedIndex < state.playlist.length - 1) {
@@ -761,7 +807,7 @@
         }
 
         if (state.isPlaying) {
-            state.sourceNode.stop();
+            state.activeSources.forEach(s => s.source.stop());
             state.pauseTime = state.audioCtx.currentTime - state.startTime;
             state.isPlaying = false;
         } else { 
@@ -771,11 +817,12 @@
     }
 
     function stop() {
-        if (state.sourceNode) try{ state.sourceNode.stop(); } catch(e){}
-        if (state.fadingOutNode) {
-             try{ state.fadingOutNode.stop(); } catch(e){}
-             state.fadingOutNode = null;
-        }
+        state.activeSources.forEach(s => {
+            try { s.source.stop(); } catch(e){}
+            try { s.source.disconnect(); s.gain.disconnect(); } catch(e){}
+        });
+        state.activeSources = [];
+        
         state.isPlaying = false; 
         state.pauseTime = 0; 
         els.playhead.style.left = '0%';
@@ -790,6 +837,9 @@
         } else {
              els.playPauseBtn.style.boxShadow = "0 0 15px var(--primary)";
              els.playPauseBtn.style.background = "var(--primary)";
+        }
+        if('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = state.isPlaying ? "playing" : "paused";
         }
     }
 
@@ -855,7 +905,7 @@
         const newTime = pct * state.audioBuffer.duration;
         state.pauseTime = newTime;
         if (state.isPlaying) {
-             if(state.sourceNode) state.sourceNode.stop();
+             state.activeSources.forEach(s => s.source.stop());
              startSound(state.audioBuffer, newTime, false);
         } else {
             els.playhead.style.left = (pct*100) + '%';
@@ -888,13 +938,18 @@
         let img = findFile(name => name.startsWith(base) && (name.endsWith('.jpg') || name.endsWith('.png')));
         if (!img) img = findFile(name => name.toLowerCase() === 'folder.jpg' || name.toLowerCase() === 'cover.jpg');
 
+        let result = { coverUrl: null };
+
         if (img) {
             const u = URL.createObjectURL(img);
             els.cover.src = u;
-            els.bg.style.backgroundImage = `url(${u})`; // Background Update
+            els.bg.style.backgroundImage = `url(${u})`;
+            result.coverUrl = u;
         } else {
-             els.cover.src = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MDAiIGhlaWdodD0iNTAwIiB2aWV3Qm94PSIwIDAgNTAwIDUwMCI+PHJlY3Qgd2lkdGg9IjUwMCIgaGVpZ2h0PSI1MDAiIGZpbGw9IiMxMTEiLz48Y2lyY2xlIGN4PSIyNTAiIGN5PSIyNTAiIHI9IjEwMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzMzIiBzdHJva2Utd2lkdGg9IjUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzU1NSIgZm9udC1zaXplPSIzMCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiPk1VU0lDPC90ZXh0Pjwvc3ZnPg==";
+             const def = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MDAiIGhlaWdodD0iNTAwIiB2aWV3Qm94PSIwIDAgNTAwIDUwMCI+PHJlY3Qgd2lkdGg9IjUwMCIgaGVpZ2h0PSI1MDAiIGZpbGw9IiMxMTEiLz48Y2lyY2xlIGN4PSIyNTAiIGN5PSIyNTAiIHI9IjEwMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzMzIiBzdHJva2Utd2lkdGg9IjUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzU1NSIgZm9udC1zaXplPSIzMCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiPk1VU0lDPC90ZXh0Pjwvc3ZnPg==";
+             els.cover.src = def;
              els.bg.style.backgroundImage = 'none';
+             result.coverUrl = def;
         }
 
         let txt = findFile(name => name === base + '.txt');
@@ -905,21 +960,25 @@
             r.onload = e => els.lyricsText.innerText = e.target.result;
             r.readAsText(txt);
         } else { els.lyricsText.innerText = "No lyrics found."; }
+        
+        return result;
     }
 
     document.getElementById('btn-play-pause').onclick = togglePlayPause;
     document.getElementById('btn-stop').onclick = stop;
-    document.getElementById('btn-start').onclick = () => { if(state.isPlaying) { state.sourceNode.stop(); startSound(state.audioBuffer, 0); } else { state.pauseTime=0; els.playhead.style.left='0%'; } };
+    document.getElementById('btn-start').onclick = () => { if(state.isPlaying) { state.activeSources.forEach(s => s.source.stop()); startSound(state.audioBuffer, 0); } else { state.pauseTime=0; els.playhead.style.left='0%'; } };
     document.getElementById('btn-next').onclick = () => { if(state.playlist.length) playTrack(state.currentIndex + 1); };
     document.getElementById('btn-prev').onclick = () => { if(state.playlist.length) playTrack(state.currentIndex - 1); };
     document.getElementById('vol-input').addEventListener('input', e => {
         state.volume = parseFloat(e.target.value);
-        updateAudioProcessors(); // Update to recalc norm gain
+        updateAudioProcessors(); 
         document.getElementById('vol-val').innerText = Math.round(state.volume*100) + "%";
+        saveState();
     });
     document.getElementById('xfade-input').addEventListener('input', e => {
         state.crossfade = parseFloat(e.target.value);
         document.getElementById('xfade-val').innerText = state.crossfade + "s";
+        saveState();
     });
     document.getElementById('btn-random').onclick = () => {
         for (let i = state.playlist.length - 1; i > 0; i--) {
@@ -927,8 +986,13 @@
             [state.playlist[i], state.playlist[j]] = [state.playlist[j], state.playlist[i]];
         }
         renderPlaylist();
+        saveState();
     };
-    document.getElementById('btn-remove').onclick = () => { state.playlist = state.playlist.filter(i => !i.selected); renderPlaylist(); };
+    document.getElementById('btn-remove').onclick = () => { 
+        state.playlist = state.playlist.filter(i => !i.selected); 
+        renderPlaylist(); 
+        saveState();
+    };
     
     document.getElementById('btn-up').onclick = () => { 
         const i = state.playlist.findIndex(x=>x.selected); 
@@ -939,6 +1003,7 @@
             if(state.loadedIndex === i) state.loadedIndex = i - 1;
             else if(state.loadedIndex === i - 1) state.loadedIndex = i;
             renderPlaylist();
+            saveState();
         } 
     };
     document.getElementById('btn-down').onclick = () => { 
@@ -950,6 +1015,7 @@
             if(state.loadedIndex === i) state.loadedIndex = i + 1;
             else if(state.loadedIndex === i + 1) state.loadedIndex = i;
             renderPlaylist();
+            saveState();
         } 
     };
 
@@ -983,6 +1049,7 @@
         if(state.eqNodes[idx]) state.eqNodes[idx].gain.value = val;
         const dblabel = document.getElementById(`db-val-${idx}`);
         if(dblabel) dblabel.innerText = (val > 0 ? '+' : '') + val + 'dB';
+        saveState();
     };
 
     window.applyPreset = (val) => {
