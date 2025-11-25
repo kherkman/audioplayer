@@ -1,0 +1,21 @@
+{
+  "name": "Neon Touch Music Player",
+  "short_name": "NeonPlayer",
+  "start_url": "./soitin.html",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#00fff2",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "YOUR_ICON_URL_HERE.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "YOUR_ICON_URL_HERE.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
